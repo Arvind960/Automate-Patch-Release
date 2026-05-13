@@ -1,0 +1,89 @@
+---
+# ============================================
+# DR ENVIRONMENT VARIABLES
+# ============================================
+
+# Environment Details
+dr_env_name: "disaster_recovery"
+dr_datacenter: "secondary"
+dr_region: "us-west-2"
+
+# Network Configuration
+dr_network:
+  subnet: "10.20.30.0/24"
+  gateway: "10.20.30.1"
+  dns_servers:
+    - "10.20.30.10"
+    - "10.20.30.11"
+
+# Directory Paths
+dr_paths:
+  backup_dir: "/opt/backups/dr"
+  artifact_dir: "/opt/artifacts/dr"
+  log_dir: "/var/log/applications/dr"
+  config_dir: "/etc/services/dr"
+
+# Service Ports
+dr_ports:
+  service_port: 8080
+  admin_port: 8081
+  metrics_port: 9090
+  debug_port: 5005
+
+# Database Configuration
+dr_database:
+  host: "dr-db-master.company.local"
+  port: 5432
+  name: "dr_db"
+  pool_size: 50
+  timeout: 30
+
+# Cache Configuration
+dr_cache:
+  redis_host: "dr-redis-master.company.local"
+  redis_port: 6379
+  redis_db: 0
+  redis_timeout: 5
+
+# JVM Settings
+dr_jvm:
+  max_heap: "8g"
+  min_heap: "4g"
+  gc_type: "G1GC"
+  max_gc_pause: "200"
+
+# Resource Limits
+dr_limits:
+  max_cpu_percent: 85
+  max_memory_percent: 85
+  max_disk_percent: 90
+  max_connections: 1000
+  max_threads: 500
+
+# Monitoring
+dr_monitoring:
+  enabled: true
+  interval: 60
+  retention_days: 30
+  alert_threshold: 80
+
+# Backup Configuration
+dr_backup:
+  enabled: true
+  retention_count: 10
+  compression: true
+  verify: true
+
+# Security
+dr_security:
+  ssl_enabled: true
+  tls_version: "1.3"
+  cipher_suites: "HIGH:!aNULL:!MD5"
+  session_timeout: 3600
+
+# Timeouts
+dr_timeouts:
+  service_stop: 30
+  service_start: 120
+  health_check: 10
+  deployment: 300

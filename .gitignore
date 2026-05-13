@@ -1,0 +1,28 @@
+# Ignore vault password files
+.vault_pass
+vault/.vault_pass
+
+# Ignore backup files
+*.bak
+*~
+
+# Ignore logs
+*.log
+
+# Ignore temporary files
+*.tmp
+.DS_Store
+
+# Ignore IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Ignore Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Ignore Ansible retry files
+*.retry

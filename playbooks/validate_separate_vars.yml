@@ -1,0 +1,50 @@
+---
+# ============================================
+# VALIDATION PLAYBOOK - SEPARATE PR/DR VARS
+# ============================================
+- name: Validate Deployment
+  hosts: "{{ target_env }}_environment"
+  gather_facts: yes
+  
+  vars_files:
+    - "{{ playbook_dir }}/../config/{{ target_env }}_vars.yml"
+  
+  vars:
+    service_name: "{{ service | mandatory }}"
+    env_ports: "{{ pr_ports if target_env == 'pr' else dr_ports }}"
+    env_database: "{{ pr_database if target_env == 'pr' else dr_database }}"
+    env_limits: "{{ pr_limits if target_env == 'pr' else dr_limits }}"
+    env_timeouts: "{{ pr_timeouts if target_env == 'pr' else dr_timeouts }}"
+    
+  tasks:
+    - name: Check service status
+      systemd:
+        name: "{{ service_name }}"
+      register: svc_status
+      failed_when: svc_status.status.ActiveState != "active"
+      
+    - name: Check port
+      wait_for:
+        port: "{{ env_ports.service_port }}"
+        timeout: "{{ env_timeouts.health_check }}"
+        
+    - name: Health check
+      uri:
+        url: "http://{{ ansible_default_ipv4.address }}:{{ env_ports.service_port }}/health"
+        status_code: 200
+        timeout: "{{ env_timeouts.health_check }}"
+        
+    - name: Database check
+      uri:
+        url: "http://{{ ansible_default_ipv4.address }}:{{ env_ports.service_port }}/health/db"
+        status_code: 200
+        
+    - name: Check CPU
+      shell: "ps aux | grep {{ service_name }} | grep -v grep | awk '{sum+=$3} END {print sum}'"
+      register: cpu
+      failed_when: cpu.stdout | float > env_limits.max_cpu_percent
+      
+    - name: Check Memory
+      shell: "ps aux | grep {{ service_name }} | grep -v grep | awk '{sum+=$4} END {print sum}'"
+      register: mem
+      failed_when: mem.stdout | float > env_limits.max_memory_percent

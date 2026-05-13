@@ -1,0 +1,114 @@
+pipeline {
+    agent any
+    
+    parameters {
+        string(name: 'SERVICE_NAME', description: 'Service to deploy')
+        string(name: 'ARTIFACT_PATH', description: 'Path to artifact/patch')
+        string(name: 'CUSTOMER_ID', defaultValue: 'default', description: 'Customer ID')
+    }
+    
+    environment {
+        ANSIBLE_CONFIG = '/etc/ansible/ansible.cfg'
+        ANSIBLE_PLAYBOOK = '/opt/ansible/playbooks/secure_deploy.yml'
+        ANSIBLE_VALIDATE = '/opt/ansible/playbooks/secure_validate.yml'
+        ANSIBLE_ROLLBACK = '/opt/ansible/playbooks/secure_rollback.yml'
+    }
+    
+    stages {
+        stage('Build/Get Artifact') {
+            steps {
+                script {
+                    echo "Artifact ready: ${params.ARTIFACT_PATH}"
+                }
+            }
+        }
+        
+        stage('Deploy to PR') {
+            steps {
+                script {
+                    echo "Deploying to PR environment..."
+                    sh """
+                        ansible-playbook ${ANSIBLE_PLAYBOOK} \
+                            -e "target_env=pr" \
+                            -e "service=${params.SERVICE_NAME}" \
+                            -e "artifact=${params.ARTIFACT_PATH}" \
+                            -e "customer=${params.CUSTOMER_ID}"
+                    """
+                }
+            }
+        }
+        
+        stage('Validate PR') {
+            steps {
+                script {
+                    echo "Validating PR deployment..."
+                    try {
+                        sh """
+                            ansible-playbook ${ANSIBLE_VALIDATE} \
+                                -e "target_env=pr" \
+                                -e "service=${params.SERVICE_NAME}"
+                        """
+                    } catch (Exception e) {
+                        echo "PR Validation FAILED! Rolling back..."
+                        sh """
+                            ansible-playbook ${ANSIBLE_ROLLBACK} \
+                                -e "target_env=pr" \
+                                -e "service=${params.SERVICE_NAME}"
+                        """
+                        error("PR validation failed. Rollback completed. DR deployment blocked.")
+                    }
+                }
+            }
+        }
+        
+        stage('Deploy to DR') {
+            when {
+                expression { currentBuild.result == null || currentBuild.result == 'SUCCESS' }
+            }
+            steps {
+                script {
+                    echo "PR successful! Deploying same artifact to DR..."
+                    sh """
+                        ansible-playbook ${ANSIBLE_PLAYBOOK} \
+                            -e "target_env=dr" \
+                            -e "service=${params.SERVICE_NAME}" \
+                            -e "artifact=${params.ARTIFACT_PATH}" \
+                            -e "customer=${params.CUSTOMER_ID}"
+                    """
+                }
+            }
+        }
+        
+        stage('Validate DR') {
+            steps {
+                script {
+                    echo "Validating DR deployment..."
+                    try {
+                        sh """
+                            ansible-playbook ${ANSIBLE_VALIDATE} \
+                                -e "target_env=dr" \
+                                -e "service=${params.SERVICE_NAME}"
+                        """
+                    } catch (Exception e) {
+                        echo "DR Validation FAILED! Rolling back DR..."
+                        sh """
+                            ansible-playbook ${ANSIBLE_ROLLBACK} \
+                                -e "target_env=dr" \
+                                -e "service=${params.SERVICE_NAME}"
+                        """
+                        error("DR validation failed. Rollback completed. PR remains stable.")
+                    }
+                }
+            }
+        }
+    }
+    
+    post {
+        success {
+            echo "✅ Deployment successful on both PR and DR"
+        }
+        failure {
+            echo "❌ Deployment failed. Check logs for details."
+        }
+    }
+}

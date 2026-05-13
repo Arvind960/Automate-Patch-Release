@@ -1,0 +1,89 @@
+---
+# ============================================
+# PR ENVIRONMENT VARIABLES
+# ============================================
+
+# Environment Details
+pr_env_name: "production"
+pr_datacenter: "primary"
+pr_region: "us-east-1"
+
+# Network Configuration
+pr_network:
+  subnet: "192.168.47.0/24"
+  gateway: "192.168.47.1"
+  dns_servers:
+    - "192.168.47.10"
+    - "192.168.47.11"
+
+# Directory Paths
+pr_paths:
+  backup_dir: "/opt/backups/pr"
+  artifact_dir: "/opt/artifacts/pr"
+  log_dir: "/var/log/applications/pr"
+  config_dir: "/etc/services/pr"
+
+# Service Ports
+pr_ports:
+  service_port: 8080
+  admin_port: 8081
+  metrics_port: 9090
+  debug_port: 5005
+
+# Database Configuration
+pr_database:
+  host: "pr-db-master.company.local"
+  port: 5432
+  name: "production_db"
+  pool_size: 50
+  timeout: 30
+
+# Cache Configuration
+pr_cache:
+  redis_host: "pr-redis-master.company.local"
+  redis_port: 6379
+  redis_db: 0
+  redis_timeout: 5
+
+# JVM Settings
+pr_jvm:
+  max_heap: "8g"
+  min_heap: "4g"
+  gc_type: "G1GC"
+  max_gc_pause: "200"
+
+# Resource Limits
+pr_limits:
+  max_cpu_percent: 85
+  max_memory_percent: 85
+  max_disk_percent: 90
+  max_connections: 1000
+  max_threads: 500
+
+# Monitoring
+pr_monitoring:
+  enabled: true
+  interval: 60
+  retention_days: 30
+  alert_threshold: 80
+
+# Backup Configuration
+pr_backup:
+  enabled: true
+  retention_count: 10
+  compression: true
+  verify: true
+
+# Security
+pr_security:
+  ssl_enabled: true
+  tls_version: "1.3"
+  cipher_suites: "HIGH:!aNULL:!MD5"
+  session_timeout: 3600
+
+# Timeouts
+pr_timeouts:
+  service_stop: 30
+  service_start: 120
+  health_check: 10
+  deployment: 300

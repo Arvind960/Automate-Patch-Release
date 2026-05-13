@@ -1,0 +1,23 @@
+---
+# ============================================
+# SIMPLE IP-BASED INVENTORY
+# Just add IPs - no complex configuration needed
+# ============================================
+
+# PR Environment - Add all PR server IPs here (100+ supported)
+pr_ips:
+  - 192.168.47.156
+  # Add more PR IPs below:
+  # - 192.168.47.158
+  # - 192.168.47.160
+  # - 192.168.47.162
+  # ... add up to 100+ IPs
+
+# DR Environment - Add all DR server IPs here (100+ supported)
+dr_ips:
+  - 192.168.47.157
+  # Add more DR IPs below:
+  # - 192.168.47.159
+  # - 192.168.47.161
+  # - 192.168.47.163
+  # ... add up to 100+ IPs

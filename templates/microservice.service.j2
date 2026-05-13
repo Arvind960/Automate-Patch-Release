@@ -1,0 +1,40 @@
+[Unit]
+Description={{ service_name }} Microservice
+After=network.target
+
+[Service]
+Type=simple
+User=deploy
+Group=deploy
+WorkingDirectory={{ artifact_dir }}/{{ service_name }}/current
+
+ExecStart=/usr/bin/java \
+    -Xms{{ min_heap_size }} \
+    -Xmx{{ max_heap_size }} \
+    -XX:+UseG1GC \
+    -XX:MaxGCPauseMillis=200 \
+    -XX:+HeapDumpOnOutOfMemoryError \
+    -XX:HeapDumpPath={{ log_dir }}/{{ service_name }}/heap_dump.hprof \
+    -Dspring.profiles.active={{ environment }} \
+    -Dserver.port={{ service_port }} \
+    -Dmanagement.server.port={{ admin_port }} \
+    -Dlogging.file.path={{ log_dir }}/{{ service_name }} \
+    -Dspring.datasource.url=jdbc:postgresql://{{ db_host }}:{{ db_port }}/{{ service_name }} \
+    -Dspring.redis.host={{ redis_host }} \
+    -Dspring.redis.port={{ redis_port }} \
+    -jar {{ artifact_dir }}/{{ service_name }}/current/{{ service_name }}.jar
+
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier={{ service_name }}
+
+NoNewPrivileges=true
+PrivateTmp=true
+
+LimitNOFILE=65536
+LimitNPROC=4096
+
+[Install]
+WantedBy=multi-user.target

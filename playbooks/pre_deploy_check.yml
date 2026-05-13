@@ -1,0 +1,42 @@
+---
+# ============================================
+# PRE-DEPLOYMENT CHECKS
+# ============================================
+- name: Pre-Deployment Validation
+  hosts: localhost
+  gather_facts: no
+  
+  vars:
+    service_name: "{{ service | mandatory }}"
+    artifact_path: "{{ artifact | mandatory }}"
+    
+  tasks:
+    - name: Verify artifact exists
+      stat:
+        path: "{{ artifact_path }}"
+      register: artifact_stat
+      failed_when: not artifact_stat.stat.exists
+      
+    - name: Verify artifact is readable
+      file:
+        path: "{{ artifact_path }}"
+        state: file
+      check_mode: yes
+      
+    - name: Get artifact size
+      stat:
+        path: "{{ artifact_path }}"
+      register: artifact_info
+      
+    - name: Verify artifact is not empty
+      assert:
+        that:
+          - artifact_info.stat.size > 0
+        fail_msg: "Artifact file is empty"
+        
+    - name: Display artifact info
+      debug:
+        msg:
+          - "Artifact: {{ artifact_path }}"
+          - "Size: {{ (artifact_info.stat.size / 1024 / 1024) | round(2) }} MB"
+          - "Modified: {{ artifact_info.stat.mtime }}"

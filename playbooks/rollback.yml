@@ -1,0 +1,227 @@
+---
+# ============================================
+# AUTOMATED ROLLBACK PLAYBOOK
+# Supports 100+ servers with variable-based configuration
+# ============================================
+- name: Rollback Microservice Deployment
+  hosts: "{{ target_env }}_environment"
+  serial: "{{ serial_execution | default(1) }}"
+  gather_facts: yes
+  
+  vars_files:
+    - "{{ playbook_dir }}/../config/{{ target_env }}_vars.yml"
+  
+  vars:
+    service_name: "{{ service }}"
+    rollback_timestamp: "{{ backup_timestamp | default('') }}"
+    rollback_time: "{{ ansible_date_time.epoch }}"
+    
+    # Load environment-specific paths
+    env_paths: "{{ pr_paths if target_env == 'pr' else dr_paths }}"
+    env_ports: "{{ pr_ports if target_env == 'pr' else dr_ports }}"
+    backup_dir: "{{ env_paths.backup_dir }}"
+    artifact_dir: "{{ env_paths.artifact_dir }}"
+    service_port: "{{ env_ports.service_port }}"
+    environment: "{{ pr_env_name if target_env == 'pr' else dr_env_name }}"
+    datacenter: "{{ pr_datacenter if target_env == 'pr' else dr_datacenter }}"
+    
+  pre_tasks:
+    - name: Validate rollback requirements
+      assert:
+        that:
+          - service_name is defined
+          - target_env is defined
+        fail_msg: "Required variables missing for rollback"
+        
+  tasks:
+    # ========== FIND BACKUP ==========
+    - name: Find latest backup if timestamp not provided
+      shell: "ls -t {{ backup_dir }}/{{ service_name }} | head -1"
+      register: latest_backup
+      when: rollback_timestamp == ''
+      changed_when: false
+      
+    - name: Set rollback timestamp
+      set_fact:
+        rollback_ts: "{{ rollback_timestamp if rollback_timestamp != '' else latest_backup.stdout }}"
+        
+    - name: Display rollback information
+      debug:
+        msg:
+          - "========================================="
+          - "INITIATING ROLLBACK"
+          - "========================================="
+          - "Service: {{ service_name }}"
+          - "Host: {{ inventory_hostname }}"
+          - "Environment: {{ environment }}"
+          - "Rollback to: {{ rollback_ts }}"
+          - "========================================="
+          
+    # ========== VERIFY BACKUP EXISTS ==========
+    - name: Check if backup binary exists
+      stat:
+        path: "{{ backup_dir }}/{{ service_name }}/{{ rollback_ts }}/{{ service_name }}.jar"
+      register: backup_file
+      
+    - name: Fail if backup not found
+      fail:
+        msg: "Backup not found at {{ backup_dir }}/{{ service_name }}/{{ rollback_ts }}/{{ service_name }}.jar"
+      when: not backup_file.stat.exists
+      
+    - name: Check backup metadata
+      stat:
+        path: "{{ backup_dir }}/{{ service_name }}/{{ rollback_ts }}/metadata.yml"
+      register: backup_metadata
+      
+    # ========== STOP CURRENT SERVICE ==========
+    - name: Stop current service
+      systemd:
+        name: "{{ service_name }}"
+        state: stopped
+      register: service_stop
+      
+    - name: Wait for service to stop completely
+      wait_for:
+        port: "{{ service_port }}"
+        state: stopped
+        timeout: 60
+      ignore_errors: yes
+      
+    - name: Kill any remaining processes
+      shell: "pkill -9 -f {{ service_name }}"
+      ignore_errors: yes
+      
+    # ========== BACKUP CURRENT FAILED VERSION ==========
+    - name: Create failed deployment backup
+      copy:
+        src: "{{ artifact_dir }}/{{ service_name }}/current/{{ service_name }}.jar"
+        dest: "{{ backup_dir }}/{{ service_name }}/failed_{{ rollback_time }}/{{ service_name }}.jar"
+        remote_src: yes
+      ignore_errors: yes
+      
+    # ========== RESTORE PREVIOUS VERSION ==========
+    - name: Restore previous binary
+      copy:
+        src: "{{ backup_dir }}/{{ service_name }}/{{ rollback_ts }}/{{ service_name }}.jar"
+        dest: "{{ artifact_dir }}/{{ service_name }}/current/{{ service_name }}.jar"
+        remote_src: yes
+        mode: '0755'
+        owner: deploy
+        group: deploy
+      register: restore_result
+      
+    - name: Restore previous configuration
+      copy:
+        src: "{{ backup_dir }}/{{ service_name }}/{{ rollback_ts }}/application.yml"
+        dest: "/etc/{{ service_name }}/application.yml"
+        remote_src: yes
+      ignore_errors: yes
+      when: backup_metadata.stat.exists
+      
+    # ========== START RESTORED SERVICE ==========
+    - name: Reload systemd daemon
+      systemd:
+        daemon_reload: yes
+        
+    - name: Start restored service
+      systemd:
+        name: "{{ service_name }}"
+        state: started
+        enabled: yes
+      register: service_start
+      
+    - name: Wait for service port
+      wait_for:
+        port: "{{ service_port }}"
+        host: "{{ ansible_default_ipv4.address }}"
+        delay: 5
+        timeout: 120
+        state: started
+      register: port_available
+      
+    # ========== VERIFY ROLLBACK ==========
+    - name: Verify service health after rollback
+      uri:
+        url: "http://{{ ansible_default_ipv4.address }}:{{ service_port }}/health"
+        method: GET
+        status_code: 200
+        timeout: 10
+      register: health_verify
+      retries: 5
+      delay: 10
+      until: health_verify.status == 200
+      
+    - name: Verify database connectivity
+      uri:
+        url: "http://{{ ansible_default_ipv4.address }}:{{ service_port }}/health/db"
+        method: GET
+        status_code: 200
+      register: db_verify
+      retries: 3
+      delay: 5
+      
+    - name: Check service status
+      systemd:
+        name: "{{ service_name }}"
+      register: final_status
+      
+    # ========== LOG ROLLBACK ==========
+    - name: Generate rollback report
+      copy:
+        content: |
+          ================================================================================
+          ROLLBACK EXECUTION REPORT
+          ================================================================================
+          Timestamp: {{ ansible_date_time.iso8601 }}
+          Service: {{ service_name }}
+          Host: {{ inventory_hostname }} ({{ ansible_default_ipv4.address }})
+          Environment: {{ environment }}
+          Datacenter: {{ datacenter }}
+          
+          ================================================================================
+          ROLLBACK DETAILS
+          ================================================================================
+          Rolled back to: {{ rollback_ts }}
+          Failed version backed up to: failed_{{ rollback_time }}
+          Restore Status: {{ 'SUCCESS' if restore_result is succeeded else 'FAILED' }}
+          
+          ================================================================================
+          POST-ROLLBACK VERIFICATION
+          ================================================================================
+          Service Status: {{ final_status.status.ActiveState }}
+          Port Available: {{ 'YES' if port_available is succeeded else 'NO' }}
+          Health Check: {{ 'PASS' if health_verify.status == 200 else 'FAIL' }}
+          DB Connectivity: {{ 'PASS' if db_verify.status == 200 else 'FAIL' }}
+          
+          ================================================================================
+          ROLLBACK RESULT
+          ================================================================================
+          {% if final_status.status.ActiveState == 'active' and health_verify.status == 200 %}
+          Status: ✅ ROLLBACK SUCCESSFUL
+          {% else %}
+          Status: ❌ ROLLBACK FAILED - MANUAL INTERVENTION REQUIRED
+          {% endif %}
+          
+          ================================================================================
+        dest: "/var/log/rollbacks/{{ service_name }}_{{ rollback_time }}.log"
+        mode: '0644'
+        
+    - name: Display rollback summary
+      debug:
+        msg:
+          - "========================================="
+          - "ROLLBACK COMPLETED"
+          - "========================================="
+          - "Service: {{ service_name }}"
+          - "Host: {{ inventory_hostname }}"
+          - "Rolled back to: {{ rollback_ts }}"
+          - "Service Status: {{ final_status.status.ActiveState }}"
+          - "Health Check: {{ 'PASS' if health_verify.status == 200 else 'FAIL' }}"
+          - "========================================="
+          
+  post_tasks:
+    - name: Send rollback notification
+      shell: |
+        echo "Rollback executed for {{ service_name }} on {{ inventory_hostname }}" | \
+        mail -s "ROLLBACK ALERT: {{ service_name }}" ops@company.com
+      ignore_errors: yes

@@ -1,0 +1,91 @@
+---
+# ============================================
+# DEPLOYMENT PLAYBOOK - SEPARATE PR/DR VARS
+# ============================================
+- name: Deploy Microservice
+  hosts: "{{ target_env }}_environment"
+  serial: "{{ serial_execution | default(1) }}"
+  gather_facts: yes
+  
+  vars_files:
+    - "{{ playbook_dir }}/../config/{{ target_env }}_vars.yml"
+    - "{{ playbook_dir }}/../vault/secrets.yml"
+  
+  vars:
+    service_name: "{{ service | mandatory }}"
+    artifact_path: "{{ artifact | mandatory }}"
+    customer_id: "{{ customer | default('default') }}"
+    deployment_timestamp: "{{ ansible_date_time.epoch }}"
+    
+    # Load environment-specific variables
+    env_name: "{{ pr_env_name if target_env == 'pr' else dr_env_name }}"
+    env_paths: "{{ pr_paths if target_env == 'pr' else dr_paths }}"
+    env_ports: "{{ pr_ports if target_env == 'pr' else dr_ports }}"
+    env_database: "{{ pr_database if target_env == 'pr' else dr_database }}"
+    env_cache: "{{ pr_cache if target_env == 'pr' else dr_cache }}"
+    env_jvm: "{{ pr_jvm if target_env == 'pr' else dr_jvm }}"
+    env_limits: "{{ pr_limits if target_env == 'pr' else dr_limits }}"
+    env_timeouts: "{{ pr_timeouts if target_env == 'pr' else dr_timeouts }}"
+    
+  pre_tasks:
+    - name: Validate required variables
+      assert:
+        that:
+          - service_name is defined
+          - artifact_path is defined
+          - target_env in ['pr', 'dr']
+        fail_msg: "Required variables missing"
+        
+    - name: Create directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - "{{ env_paths.backup_dir }}/{{ service_name }}"
+        - "{{ env_paths.artifact_dir }}/{{ service_name }}"
+        - "{{ env_paths.log_dir }}/{{ service_name }}"
+        
+  tasks:
+    - name: Backup current version
+      copy:
+        src: "{{ env_paths.artifact_dir }}/{{ service_name }}/current.jar"
+        dest: "{{ env_paths.backup_dir }}/{{ service_name }}/{{ deployment_timestamp }}.jar"
+        remote_src: yes
+      ignore_errors: yes
+      
+    - name: Stop service
+      systemd:
+        name: "{{ service_name }}"
+        state: stopped
+      timeout: "{{ env_timeouts.service_stop }}"
+      ignore_errors: yes
+      
+    - name: Deploy artifact
+      copy:
+        src: "{{ artifact_path }}"
+        dest: "{{ env_paths.artifact_dir }}/{{ service_name }}/current.jar"
+        mode: '0755'
+        
+    - name: Update service configuration
+      template:
+        src: "{{ playbook_dir }}/../templates/microservice.service.j2"
+        dest: "/etc/systemd/system/{{ service_name }}.service"
+        
+    - name: Start service
+      systemd:
+        name: "{{ service_name }}"
+        state: started
+        daemon_reload: yes
+        
+    - name: Wait for service
+      wait_for:
+        port: "{{ env_ports.service_port }}"
+        timeout: "{{ env_timeouts.service_start }}"
+        
+    - name: Health check
+      uri:
+        url: "http://{{ ansible_default_ipv4.address }}:{{ env_ports.service_port }}/health"
+        timeout: "{{ env_timeouts.health_check }}"
+      retries: 3
+      delay: 5
